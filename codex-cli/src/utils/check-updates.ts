@@ -1,10 +1,11 @@
 import type { AgentName } from "package-manager-detector";
 
-import { detectInstallerByPath } from "./package-manager-detector";
 import { CLI_VERSION } from "../version";
+import { detectInstallerByPath } from "./package-manager-detector";
 import boxen from "boxen";
 import chalk from "chalk";
 import { getLatestVersion } from "fast-npm-meta";
+import { spawnSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getUserAgent } from "package-manager-detector";
@@ -42,10 +43,7 @@ export function renderUpdateCommand({
   return updateCommands[manager];
 }
 
-function renderUpdateMessage(options: UpdateOptions) {
-  const updateCommand = renderUpdateCommand(options);
-  return `To update, run ${chalk.magenta(updateCommand)} to update.`;
-}
+
 
 async function writeState(stateFilePath: string, state: UpdateCheckState) {
   await writeFile(stateFilePath, JSON.stringify(state, null, 2), {
@@ -71,7 +69,7 @@ async function getUpdateCheckInfo(
   };
 }
 
-export async function checkForUpdates(): Promise<void> {
+export async function checkForUpdates(autoInstall = true): Promise<boolean> {
   const { CONFIG_DIR } = await import("./config");
   const stateFile = join(CONFIG_DIR, "update-check.json");
 
@@ -89,7 +87,7 @@ export async function checkForUpdates(): Promise<void> {
     Date.now() - new Date(state.lastUpdateCheck).valueOf() <
       UPDATE_CHECK_FREQUENCY
   ) {
-    return;
+    return false;
   }
 
   // Fetch current vs latest from the registry
@@ -105,7 +103,7 @@ export async function checkForUpdates(): Promise<void> {
     !packageInfo ||
     !semver.gt(packageInfo.latestVersion, packageInfo.currentVersion)
   ) {
-    return;
+    return false;
   }
 
   // Detect global installer
@@ -116,22 +114,48 @@ export async function checkForUpdates(): Promise<void> {
     const local = getUserAgent();
     if (!local) {
       // No package managers found, skip it.
-      return;
+      return false;
     }
     managerName = local;
   }
 
-  const updateMessage = renderUpdateMessage({
+  const updateCommand = renderUpdateCommand({
     manager: managerName,
     packageName,
   });
+
+  if (autoInstall) {
+    const result = spawnSync(updateCommand, {
+      shell: true,
+      stdio: "inherit",
+    });
+
+    if (result.status === 0) {
+      const box = boxen(
+        `Updated to ${chalk.green(
+          packageInfo.latestVersion,
+        )}. Please restart Codex to use the new version.`,
+        {
+          padding: 1,
+          margin: 1,
+          align: "center",
+          borderColor: "yellow",
+          borderStyle: "round",
+        },
+      );
+
+      // eslint-disable-next-line no-console
+      console.log(box);
+      return true;
+    }
+  }
 
   const box = boxen(
     `\
 Update available! ${chalk.red(packageInfo.currentVersion)} → ${chalk.green(
       packageInfo.latestVersion,
     )}.
-${updateMessage}`,
+To update, run ${chalk.magenta(updateCommand)} to update.`,
     {
       padding: 1,
       margin: 1,
@@ -143,4 +167,5 @@ ${updateMessage}`,
 
   // eslint-disable-next-line no-console
   console.log(box);
+  return false;
 }

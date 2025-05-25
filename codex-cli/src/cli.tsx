@@ -407,12 +407,16 @@ config = {
   flexMode: cli.flags.flexMode || (config.flexMode ?? false),
   provider,
   disableResponseStorage,
+  autoUpdate: config.autoUpdate !== false,
 };
 
 // Check for updates after loading config. This is important because we write state file in
 // the config dir.
 try {
-  await checkForUpdates();
+  const updated = await checkForUpdates(config.autoUpdate);
+  if (updated) {
+    process.exit(0);
+  }
 } catch {
   // ignore
 }

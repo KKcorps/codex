@@ -148,6 +148,8 @@ export type StoredConfig = {
   notify?: boolean;
   /** Disable server-side response storage (send full transcript each request) */
   disableResponseStorage?: boolean;
+  /** Automatically install CLI updates when available */
+  autoUpdate?: boolean;
   flexMode?: boolean;
   providers?: Record<string, { name: string; baseURL: string; envKey: string }>;
   history?: {
@@ -199,6 +201,9 @@ export type AppConfig = {
 
   /** Disable server-side response storage (send full transcript each request) */
   disableResponseStorage?: boolean;
+
+  /** Automatically install CLI updates when available */
+  autoUpdate?: boolean;
 
   /** Enable the "flex-mode" processing mode for supported models (o3, o4-mini) */
   flexMode?: boolean;
@@ -379,6 +384,19 @@ export const loadConfig = (
     }
   }
 
+  if (storedConfig.autoUpdate !== undefined && typeof storedConfig.autoUpdate !== "boolean") {
+    if (storedConfig.autoUpdate === "true") {
+      storedConfig.autoUpdate = true;
+    } else if (storedConfig.autoUpdate === "false") {
+      storedConfig.autoUpdate = false;
+    } else {
+      log(
+        `[codex] Warning: 'autoUpdate' in config is not a boolean (got '${storedConfig.autoUpdate}'). Ignoring this value.`,
+      );
+      delete storedConfig.autoUpdate;
+    }
+  }
+
   const instructionsFilePathResolved =
     instructionsPath ?? INSTRUCTIONS_FILEPATH;
   const userInstructions = existsSync(instructionsFilePathResolved)
@@ -437,6 +455,7 @@ export const loadConfig = (
       },
     },
     disableResponseStorage: storedConfig.disableResponseStorage === true,
+    autoUpdate: storedConfig.autoUpdate !== false,
     reasoningEffort: storedConfig.reasoningEffort,
     fileOpener: storedConfig.fileOpener,
   };
@@ -558,6 +577,7 @@ export const saveConfig = (
     providers: config.providers,
     approvalMode: config.approvalMode,
     disableResponseStorage: config.disableResponseStorage,
+    autoUpdate: config.autoUpdate,
     flexMode: config.flexMode,
     reasoningEffort: config.reasoningEffort,
   };
