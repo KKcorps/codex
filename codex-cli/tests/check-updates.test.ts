@@ -4,6 +4,7 @@ import os from "node:os";
 import type { UpdateOptions } from "../src/utils/check-updates";
 import { getLatestVersion } from "fast-npm-meta";
 import { getUserAgent } from "package-manager-detector";
+import { spawnSync } from "node:child_process";
 import {
   checkForUpdates,
   renderUpdateCommand,
@@ -46,9 +47,12 @@ vi.mock("../src/utils/package-manager-detector", async (importOriginal) => {
   };
 });
 
+vi.mock("node:child_process", () => ({ spawnSync: vi.fn(() => ({ status: 0 })) }));
+
 // Mock external services
 vi.mock("fast-npm-meta", () => ({ getLatestVersion: vi.fn() }));
 vi.mock("package-manager-detector", () => ({ getUserAgent: vi.fn() }));
+vi.mock("node:child_process", () => ({ spawnSync: vi.fn(() => ({ status: 0 })) }));
 
 describe("renderUpdateCommand()", () => {
   it.each([
@@ -78,6 +82,7 @@ describe("checkForUpdates()", () => {
     // Freeze time so the 24h logic is deterministic
     vi.useFakeTimers().setSystemTime(new Date("2025-01-01T00:00:00Z"));
     vi.resetAllMocks();
+    vi.mocked(spawnSync).mockReturnValue({ status: 0 } as any);
   });
 
   afterEach(async () => {
@@ -97,12 +102,18 @@ describe("checkForUpdates()", () => {
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await checkForUpdates();
+    const updated = await checkForUpdates();
 
-    // should render using `pnpm` (global) rather than `npm`
+    expect(updated).toBe(true);
+    expect(spawnSync).toHaveBeenCalledOnce();
+    expect(spawnSync).toHaveBeenCalledWith("pnpm add -g my-pkg", {
+      shell: true,
+      stdio: "inherit",
+    });
+    // should print restart message
     expect(logSpy).toHaveBeenCalledOnce();
     const output = logSpy.mock.calls.at(0)?.at(0);
-    expect(output).toContain("pnpm add -g"); // global branch used
+    expect(output).toContain("Updated to 2.0.0");
     // state updated
     const newState = JSON.parse(memfs[STATE_PATH]!);
     expect(newState.lastUpdateCheck).toBe(new Date().toUTCString());
@@ -116,10 +127,12 @@ describe("checkForUpdates()", () => {
     const versionSpy = vi.mocked(getLatestVersion);
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await checkForUpdates();
+    const updated = await checkForUpdates();
 
+    expect(updated).toBe(false);
     expect(versionSpy).not.toHaveBeenCalled();
     expect(logSpy).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
   });
 
   it("does not print when up-to-date", async () => {
@@ -131,9 +144,11 @@ describe("checkForUpdates()", () => {
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await checkForUpdates();
+    const updated = await checkForUpdates();
 
+    expect(updated).toBe(false);
     expect(logSpy).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
     // but state still written
     const state = JSON.parse(memfs[STATE_PATH]!);
     expect(state.lastUpdateCheck).toBe(new Date().toUTCString());
@@ -146,10 +161,32 @@ describe("checkForUpdates()", () => {
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await checkForUpdates();
+    const updated = await checkForUpdates();
 
+    expect(updated).toBe(false);
     expect(logSpy).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
     // state still written
+    const state = JSON.parse(memfs[STATE_PATH]!);
+    expect(state.lastUpdateCheck).toBe(new Date().toUTCString());
+  });
+
+  it("skips auto install when disabled", async () => {
+    const old = new Date("2000-01-01T00:00:00Z").toUTCString();
+    memfs[STATE_PATH] = JSON.stringify({ lastUpdateCheck: old });
+
+    vi.mocked(getLatestVersion).mockResolvedValue({ version: "2.0.0" } as any);
+    vi.mocked(detectInstallerByPath).mockResolvedValue(undefined);
+    vi.mocked(getUserAgent).mockReturnValue("npm");
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const updated = await checkForUpdates(false);
+
+    expect(updated).toBe(false);
+    expect(spawnSync).not.toHaveBeenCalled();
+    const output = logSpy.mock.calls[0]![0] as string;
+    expect(output).toContain("npm install -g");
     const state = JSON.parse(memfs[STATE_PATH]!);
     expect(state.lastUpdateCheck).toBe(new Date().toUTCString());
   });
@@ -164,10 +201,12 @@ describe("checkForUpdates()", () => {
     vi.mocked(getUserAgent).mockReturnValue("bun");
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.mocked(spawnSync).mockReturnValueOnce({ status: 1 } as any);
 
-    await checkForUpdates();
+    const updated = await checkForUpdates();
 
-    expect(logSpy).toHaveBeenCalledOnce();
+    expect(updated).toBe(false);
+    expect(spawnSync).toHaveBeenCalledOnce();
     const output = logSpy.mock.calls[0]![0] as string;
     expect(output).toContain("bun add -g");
     expect(output).to.matchSnapshot();

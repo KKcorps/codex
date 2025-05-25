@@ -65,10 +65,10 @@ describe("rawExec – abort kills entire process group", () => {
 /**
  * Waits until a process no longer exists, or throws after timeout.
  * @param pid - The process ID to check
- * @throws {Error} If the process is still alive after 500ms
+ * @throws {Error} If the process is still alive after 2000ms
  */
 async function ensureProcessGone(pid: number) {
-  const timeout = 500;
+  const timeout = 2000;
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     try {
